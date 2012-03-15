@@ -91,7 +91,7 @@ def interpolate_image(x, y, values, bbox=None, delta=None, method='nearest'):
 
     if method in ["nearest", "linear", "cubic"]:
         # Standard interpolations
-        im = griddata((x, y), values, (grid_x, grid_y))
+        im = griddata((x, y), values, (grid_x, grid_y), method=method)
     elif method.startswith("rbf"):
         # Interpolate with Radial Basis Functions
         # http://en.wikipedia.org/wiki/Radial_Basis_Function
