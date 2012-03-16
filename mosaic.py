@@ -19,11 +19,12 @@ def read_positions(fname="positions_mosaic.dat"):
     'ap'    : number of aperture
     'x',    : x position of aperture [???UNITS???]
     'y',    : y position of aperture [???UNITS???]
-    'field' : which field the aperture is from
+    'Field' : which field the aperture is from
+              (capital letter since there is already a recarray.field() method) 
     'flag'  : ???CHECK???
     """
     dtype = {
-        'names' : ('index', 'ap', 'x', 'y', 'field', 'flag'),
+        'names' : ('index', 'ap', 'x', 'y', 'Field', 'flag'),
         'formats' : ('i4', 'i4', 'f4', 'f4', 'S5', 'i4')
         }
     return np.loadtxt(fname, dtype=dtype).view(type=np.recarray)
@@ -45,6 +46,20 @@ def read_fits_table(fname="Hgamma_mosaic_sb.fits"):
     with pyfits.open(fname) as f:
         table = f[1].data
     return table
+
+def rescale_fluxes_per_field(fluxes, fields, datafile="overlap_factors.dat"):
+    """
+    Rescale all the fluxes in each field by a constant value
+
+    Example usage: 
+
+             table.flux = rescale_fluxes_per_field(table.flux, pos["field"])
+    """
+    # make a dict of rescale factors for each field
+    factordict = dict(np.loadtxt(datafile, dtype="S8, f"))
+    for field, factor in factordict.items():
+        fluxes[fields==field] /= factor 
+    return fluxes
 
 
 def interpolate_image(x, y, values, bbox=None, delta=None, method='nearest'):
