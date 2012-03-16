@@ -148,3 +148,22 @@ def process_all_lines(method="nearest", delta=0.5):
             print "Writing FITS files for ", emline, specid, delta, method
         write_fits_images(emline, specid=specid, delta=delta, method=method)
     return True
+
+def find_overlaps(diameter=2.68, pos=None):
+    """
+    Find apertures that overlap between any two adjacent fields
+    """
+
+    if pos is None:             # read pos data if not passed in
+        pos = read_positions()
+
+    # simple loop algorithm
+    for i in range(len(pos)):
+        x0, y0 = pos.x[i], pos.y[i]
+        others = pos[pos.index != i+1]
+        distances = np.apply_along_axis(np.linalg.norm, 0, (others.x-x0, others.y-y0))
+        overlaps = others[distances < diameter]
+        if len(overlaps) > 0:
+            print pos.index[i], overlaps.index
+            # print "*** %s ***" % (pos[i])
+            # print overlaps
