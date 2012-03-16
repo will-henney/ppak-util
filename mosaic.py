@@ -131,9 +131,10 @@ def write_fits_images(emline, specid="sb", delta=0.5, method="nearest"):
     Write one image file for each data column in the mosaic
     table. Image file names are of the form:
 
-    EMLINE-VAR-METHOD-DELTA.fits
+    EMLINE-SPECID-VAR-METHOD-DELTA.fits
 
     EMLINE is the emission line label
+    SPECID is the spectral range label (e.g., "sb" for short blue, etc)
     VAR is the data column variable that is being mapped (e.g., flux, center, etc)
     METHOD is the interpolation method
     DELTA is the pixel size in units of 0.1 arcsec
@@ -144,7 +145,8 @@ def write_fits_images(emline, specid="sb", delta=0.5, method="nearest"):
     table = read_fits_table("%s_mosaic_%s.fits" % (emline, specid))
     for name in table.names:
         im = interpolate_image(pos.x, pos.y, table[name], delta=delta, method=method)
-        outfilename = "%s-%s-%s-%2.2i.fits" % (emline, name, method, 10*delta)
+        outfilename = "%s-%s-%s-%s-%2.2i.fits" % (
+            emline, specid, name, method, 10*delta)
         if VERBOSE:
             print "Image shape: ", im.shape
             print "Writing FITS file: ", outfilename
