@@ -62,7 +62,7 @@ def rescale_fluxes_per_field(fluxes, fields, datafile="overlap_factors.dat"):
     return fluxes
 
 
-def interpolate_image(x, y, values, bbox=None, delta=None, method='nearest'):
+def interpolate_image(x, y, values, bbox=None, delta=None, method='nearest', full=True):
     """
     Interpolate an image from sequences of positions and values
 
@@ -75,11 +75,12 @@ def interpolate_image(x, y, values, bbox=None, delta=None, method='nearest'):
     bbox   : bounding box of image [xmin, xmax, ymin, ymax] (default: fit to data)
     delta  : size of pixels in same units as x, y (default: deduce from data)
     method : interpolation method (default: "nearest" using scipy.interpolate.griddata)
+    full   : whether to return WCS info dict as well as image (default False)
 
     Output: 
 
-    image : interpolated image
-    
+    image   : interpolated image
+    wcsdict : (optional) dict of WCS info (CRPIX1, CRVAL1, etc.) 
     """
     from scipy.interpolate import griddata, Rbf
 
@@ -106,6 +107,16 @@ def interpolate_image(x, y, values, bbox=None, delta=None, method='nearest'):
         np.arange(ymin, ymax+dy, dy)
         ) 
 
+    # Calculate the WCS info for the fits file
+    # See Sec 8 of x-bdsk://Pence:2010 
+    # http://adsabs.harvard.edu/abs/2010A%26A...524A..42P
+    wcsdict = dict(
+        CRVAL1 = xmin, CRVAL2 = ymin, 
+        CRPIX1 = 1, CRPIX2 = 1,
+        PC1_1 = 1.0, PC1_2 = 0.0, PC2_1 = 0.0, PC2_2 = 1.0,
+        CDELT1 = dx, CDELT2 = dy,
+        )
+
     if method in ["nearest", "linear", "cubic"]:
         # Standard interpolations
         im = griddata((x, y), values, (grid_x, grid_y), method=method)
@@ -121,10 +132,13 @@ def interpolate_image(x, y, values, bbox=None, delta=None, method='nearest'):
         rbf = Rbf(x, y, values, function=function)
         im = rbf(grid_x, grid_y)
 
-    return im
+    if full:
+        return im, wcsdict
+    else:
+        return im
     
     
-def write_fits_images(emline, specid="sb", delta=0.5, method="nearest"):
+def write_fits_images(emline, specid="sb", delta=0.5, method="nearest", rescale=False):
     """
     Write a series of interpolated FITS images for a single emission line
 
@@ -139,21 +153,34 @@ def write_fits_images(emline, specid="sb", delta=0.5, method="nearest"):
     METHOD is the interpolation method
     DELTA is the pixel size in units of 0.1 arcsec
     
-    Example: FeIII4658-flux-nearest-05.fits
+    Example: FeIII4658-sb-flux-nearest-05.fits
     """
     pos = read_positions()
     table = read_fits_table("%s_mosaic_%s.fits" % (emline, specid))
+    
+    if rescale:                 # Optionally perform rescaling
+        table.flux = rescale_fluxes_per_field(table.flux, pos.Field)
+
     for name in table.names:
-        im = interpolate_image(pos.x, pos.y, table[name], delta=delta, method=method)
+        hdu = pyfits.PrimaryHDU()
+        im, wcsdict = interpolate_image(pos.x, pos.y, table[name], 
+                                        delta=delta, method=method, full=True)
+        hdu.data = im[:,::-1]   # why do we need to reflect the x-axis?
+        hdu.header.update("LINE", emline)
+        hdu.header.update("SPECID", specid)
+        hdu.header.update("VARIABLE", name)
+        hdu.header.update("INTERP", method)
+        for k, v in wcsdict.items():
+            hdu.header.update(k, v)
         outfilename = "%s-%s-%s-%s-%2.2i.fits" % (
             emline, specid, name, method, 10*delta)
         if VERBOSE:
             print "Image shape: ", im.shape
             print "Writing FITS file: ", outfilename
-        pyfits.writeto(outfilename, im[:,::-1], clobber=True)
+        hdu.writeto(outfilename, clobber=True)
     return True
 
-def process_all_lines(method="nearest", delta=0.5):
+def process_all_lines(method="nearest", delta=0.5, rescale=True):
     """
     Call write_fits_images for each emission line mosaic in current directory
     """
@@ -163,7 +190,8 @@ def process_all_lines(method="nearest", delta=0.5):
         emline, middle, specid = mosaicfile.split(".")[0].split("_")
         if VERBOSE:
             print "Writing FITS files for ", emline, specid, delta, method
-        write_fits_images(emline, specid=specid, delta=delta, method=method)
+        write_fits_images(emline, specid=specid, delta=delta, 
+                          method=method, rescale=rescale)
     return True
 
 def find_overlaps(diameter=2.68, pos=None):
