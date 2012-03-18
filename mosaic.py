@@ -25,9 +25,14 @@ def read_positions(fname="positions_mosaic.dat"):
     """
     dtype = {
         'names' : ('index', 'ap', 'x', 'y', 'Field', 'flag'),
-        'formats' : ('i4', 'i4', 'f4', 'f4', 'S5', 'i4')
+        'formats' : ('i4', 'i4', 'f4', 'f4', 'S7', 'i4')
         }
-    return np.loadtxt(fname, dtype=dtype).view(type=np.recarray)
+    try: 
+        posdata = np.loadtxt(fname, dtype=dtype).view(type=np.recarray)
+    except ValueError:          # maybe the file has a header row - try and skip it
+        posdata = np.loadtxt(fname, dtype=dtype, skiprows=1).view(type=np.recarray)
+
+    return posdata
 
 def read_fits_table(fname="Hgamma_mosaic_sb.fits"):
     """
@@ -115,6 +120,7 @@ def interpolate_image(x, y, values, bbox=None, delta=None, method='nearest', ful
         CRPIX1 = 1, CRPIX2 = 1,
         PC1_1 = 1.0, PC1_2 = 0.0, PC2_1 = 0.0, PC2_2 = 1.0,
         CDELT1 = dx, CDELT2 = dy,
+        CTYPE1 = "PIXEL", CTYPE2 = "PIXEL"
         )
 
     if method in ["nearest", "linear", "cubic"]:
@@ -180,6 +186,37 @@ def write_fits_images(emline, specid="sb", delta=0.5, method="nearest", rescale=
         hdu.writeto(outfilename, clobber=True)
     return True
 
+
+def write_fits_ratios(ratio, specrange="green", delta=0.5, method="nearest"):
+    """
+    Similar to write_fits_images() but for the ratio files
+
+    ratio : e.g., dSII, dClIII, dOII
+    specrange : either "red", "green", or "blue"
+    """
+    pos = read_positions("positions_%s_long.dat" % (specrange))
+    table = read_fits_table("M42_%s.fits" % (ratio))
+
+    for name in table.names:
+        hdu = pyfits.PrimaryHDU()
+        mask = ~np.isnan(table[name])
+        im, wcsdict = interpolate_image(pos.x[mask], pos.y[mask], table[name][mask], 
+                                        delta=delta, method=method, full=True)
+        hdu.data = im[:,::-1]   # why do we need to reflect the x-axis?
+        hdu.header.update("RATIO", ratio)
+        hdu.header.update("SPECRANG", specrange)
+        hdu.header.update("VARIABLE", name)
+        hdu.header.update("INTERP", method)
+        for k, v in wcsdict.items():
+            hdu.header.update(k, v)
+        outfilename = "%s-%s-%s-%s-%2.2i.fits" % (
+            ratio, specrange, name, method, 10*delta)
+        if VERBOSE:
+            print "Image shape: ", im.shape
+            print "Writing FITS file: ", outfilename
+        hdu.writeto(outfilename, clobber=True)
+    return True
+
 def process_all_lines(method="nearest", delta=0.5, rescale=True):
     """
     Call write_fits_images for each emission line mosaic in current directory
@@ -194,21 +231,41 @@ def process_all_lines(method="nearest", delta=0.5, rescale=True):
                           method=method, rescale=rescale)
     return True
 
-def find_overlaps(diameter=2.68, pos=None):
+def find_overlaps(diameter=4.0, posid="positions_green_long", nmax=None):
     """
     Find apertures that overlap between any two adjacent fields
+
+    The aperture size is 2.68 arcsec, but we take a slightly larger diameter by default
+
+    The algorithm is rather inefficient and counts every pair twice.
+
+    nmax : If set, this is maximum number of apertures to process - only for testing
     """
 
-    if pos is None:             # read pos data if not passed in
-        pos = read_positions()
+    pos = read_positions(posid + ".dat")
 
+    fieldset = set(pos.Field)
+
+    if nmax is None:
+        nmax = len(pos)
     # simple loop algorithm
-    for i in range(len(pos)):
+    pairdict = dict()           # dict to save the pairs of overlaps
+    for i in range(nmax):
+        thisField = pos.Field[i]
+        thisindex = pos.index[i]
         x0, y0 = pos.x[i], pos.y[i]
-        others = pos[pos.index != i+1]
+        others = pos[pos.Field != thisField]
         distances = np.apply_along_axis(np.linalg.norm, 0, (others.x-x0, others.y-y0))
-        overlaps = others[distances < diameter]
-        if len(overlaps) > 0:
-            print pos.index[i], overlaps.index
-            # print "*** %s ***" % (pos[i])
-            # print overlaps
+        overlapmask = distances <= diameter
+        otherindices = others.index[overlapmask]
+        if len(otherindices) > 0:
+            otherFields = others.Field[overlapmask]
+            otherseps = distances[overlapmask]
+            # print thisField, pos.index[i]
+            for otherindex, otherField, othersep in zip(otherindices, otherFields, otherseps):
+                # print "--> ", otherField, otherindex, othersep
+                pairdict[(int(thisindex), int(otherindex))] = dict(
+                    Fields=(thisField, otherField), sep=float(othersep)
+                    )
+
+    return pairdict
