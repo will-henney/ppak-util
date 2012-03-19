@@ -315,11 +315,11 @@ def find_overlaps(diameter=2.68, maxsep=3.5, posid="positions_green_long"):
     # Note that we don't actually use the ap values anywhere
 
     # The return value of this function is pairdict, which is a dict
-    # with keys that are 2-tuples of fields that overlap and values
-    # that are dicts keyed by the indices of the apertures in the
-    # first field.  The values in /these/ dicts are lists of (sep,
-    # index) pairs, where the index is of the neighbouring aperture in
-    # the second field and the list is ordered by separation (closest
+    # with keys that are 2-tuples of fields that overlap.  The values
+    # are dicts keyed by the indices of the apertures in the first
+    # field.  The values in /these/ dicts are lists of (sep, index)
+    # pairs, where the index is of the neighbouring aperture in the
+    # second field and the list is ordered by separation (closest
     # first).
     # 
     # Example of part of one item of pairdict is:
