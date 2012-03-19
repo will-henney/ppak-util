@@ -231,7 +231,7 @@ def process_all_lines(method="nearest", delta=0.5, rescale=True):
                           method=method, rescale=rescale)
     return True
 
-def find_overlaps(diameter=4.0, posid="positions_green_long", nmax=None):
+def find_overlaps_slow(diameter=4.0, posid="positions_green_long", nmax=None):
     """
     Find apertures that overlap between any two adjacent fields
 
@@ -269,3 +269,100 @@ def find_overlaps(diameter=4.0, posid="positions_green_long", nmax=None):
                     )
 
     return pairdict
+
+def find_overlaps(diameter=2.68, maxsep=3.5, posid="positions_green_long"):
+    """
+    Find apertures that overlap between any two adjacent fields
+
+    The aperture diameter is 2.68 arcsec, which is the maximum
+    separation that will produce overlap.  If there is at least one
+    overlap, then we also look for other neighbours at slightly larger
+    separations up to maxsep.
+
+    The algorithm is much much faster the previous one (factor of 50
+    at least), but can potentially use a lot of memory.
+    """
+
+    pos = read_positions(posid + ".dat")
+
+    fieldset = set(pos.Field)
+
+    # Make 2d array of separations between pairs
+    S = np.sqrt((pos.x - pos.x[:,np.newaxis])**2 + (pos.y - pos.y[:,np.newaxis])**2)
+
+    # Create a mask that contains only elements in the upper triangle above diagonal
+    # This is so that we eliminate self-separations (diagonal) and double counting
+    mask = np.zeros_like(S, dtype=np.bool)
+    mask[np.triu_indices_from(S)] = True
+    mask[np.diag_indices_from(S)] = False
+    # Now restrict mask to pairs with small enough separation
+    mask = mask & (S < maxsep)
+    # convert mask to lists of indices
+    I, J = np.nonzero(mask)
+    # and zip them into a list of pairs of indices
+    indexpairs = zip(I, J)
+
+    #
+    # Now pack all the results into a nicely organized data structure
+    #
+
+    # Make some convenience arrays with only the masked points
+    Iindices = pos.index[I]
+    Jindices = pos.index[J]
+    IFields = pos.Field[I]
+    JFields = pos.Field[J]
+    seps = S[mask]
+    # Note that we don't actually use the ap values anywhere
+
+    # The return value of this function is pairdict, which is a dict
+    # with keys that are 2-tuples of fields that overlap and values
+    # that are dicts keyed by the indices of the apertures in the
+    # first field.  The values in /these/ dicts are lists of (sep,
+    # index) pairs, where the index is of the neighbouring aperture in
+    # the second field and the list is ordered by separation (closest
+    # first).
+    # 
+    # Example of part of one item of pairdict is:
+    #         { ...., 
+    #           ('c7_lg', 'c19_lg'):  {4157: [(1.2907702, 7097),
+    #                                         (2.1837666, 7042),
+    #                                         (2.8555672, 7021),
+    #                                         (3.1828291, 7057)],
+    #                                  4158: [(1.2907702, 7089),
+    #                                         (2.1736367, 7054),
+    #                                         (2.8703377, 7024),
+    #                                         (3.1819005, 7074)],
+    #                                  .... }
+    #            .... }
+    #
+    fieldpairset = set(zip(pos.Field[I], pos.Field[J]))
+    pairdict = dict()
+    for fieldpair in fieldpairset:
+        thisIField, thisJField = fieldpair
+        if thisIField == thisJField:
+            continue            # skip neighbours in the same field
+        thisfieldpairmask = (IFields==thisIField) & (JFields==thisJField)
+        indexset = set(Iindices[thisfieldpairmask])
+        indexdict = dict()
+        for thisIindex in indexset:
+            neighbourmask = (thisfieldpairmask) & (Iindices==thisIindex)
+            neighbour_seps = seps[neighbourmask]
+            if neighbour_seps.min() > diameter:
+                continue        # skip cases where there is no actual overlap
+            neighbour_indices = Jindices[neighbourmask]
+            indexdict[thisIindex] = sorted(zip(neighbour_seps, neighbour_indices))
+        pairdict[fieldpair] = indexdict
+
+    return pairdict
+
+
+
+def fieldpair_sortkey(pair):
+    "Rewrite the field id pairs so that lexigraphical sorting works properly"
+    def leftpadzero(s):
+        "Changes 'c1_lg_1' -> 'c001_lg_1', etc"
+        parts = s.split("_")
+        parts[0] = parts[0][0] + "%3.3i" % (int(parts[0][1:]))
+        return "_".join(parts)
+    return tuple([leftpadzero(s) for s in pair])
+
