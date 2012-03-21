@@ -6,6 +6,7 @@ Initial version: WJH 14 Mar 2012
 
 import pyfits
 import numpy as np
+import warnings
 
 VERBOSE = False
 
@@ -61,9 +62,12 @@ def rescale_fluxes_per_field(fluxes, fields, datafile="overlap_factors.dat"):
              table.flux = rescale_fluxes_per_field(table.flux, pos["field"])
     """
     # make a dict of rescale factors for each field
-    factordict = dict(np.loadtxt(datafile, dtype="S8, f"))
-    for field, factor in factordict.items():
-        fluxes[fields==field] /= factor 
+    try: 
+        factordict = dict(np.loadtxt(datafile, dtype="S8, f"))
+        for field, factor in factordict.items():
+            fluxes[fields==field] /= factor 
+    except IOError:
+        warnings.warn("Flux rescale failed: error reading from %s" % (datafile))
     return fluxes
 
 
@@ -144,7 +148,8 @@ def interpolate_image(x, y, values, bbox=None, delta=None, method='nearest', ful
         return im
     
     
-def write_fits_images(emline, specid="sb", delta=0.5, method="nearest", rescale=False):
+def write_fits_images(emline, specid="sb", delta=0.5, 
+                      method="nearest", rescale=False, pos=None):
     """
     Write a series of interpolated FITS images for a single emission line
 
@@ -161,7 +166,8 @@ def write_fits_images(emline, specid="sb", delta=0.5, method="nearest", rescale=
     
     Example: FeIII4658-sb-flux-nearest-05.fits
     """
-    pos = read_positions()
+    if pos is None:
+        pos = read_positions()
     table = read_fits_table("%s_mosaic_%s.fits" % (emline, specid))
     
     if rescale:                 # Optionally perform rescaling
@@ -222,13 +228,34 @@ def process_all_lines(method="nearest", delta=0.5, rescale=True):
     Call write_fits_images for each emission line mosaic in current directory
     """
     import glob
+    fallback_posfile = "positions_mosaic.dat"
     mosaicfiles = glob.glob("*_mosaic_*.fits")
     for mosaicfile in mosaicfiles:
         emline, middle, specid = mosaicfile.split(".")[0].split("_")
+
+        # New version of position files 21 Mar 2012
+        # Separate file for long and short exposures
+        if specid.startswith("s"):
+            posfile = "positions_mosaic_long.dat"
+        elif specid.startswith("l"):
+            posfile = "positions_mosaic_short.dat"
+        else:
+            warnings.warn("Unrecognised spectral range: %s" % (specid))
+            posfile = fallback_posfile
+
+        # Try to cover all possibilities for where the position file might be
+        try:
+            pos = read_positions(posfile)
+        except IOError:
+            try: 
+                pos = read_positions("../" + posfile)
+            except IOError:
+                pos = read_positions(fallback_posfile)
+
         if VERBOSE:
             print "Writing FITS files for ", emline, specid, delta, method
         write_fits_images(emline, specid=specid, delta=delta, 
-                          method=method, rescale=rescale)
+                          method=method, rescale=rescale, pos=pos)
     return True
 
 def find_overlaps_slow(diameter=4.0, posid="positions_green_long", nmax=None):
@@ -358,7 +385,7 @@ def find_overlaps(diameter=2.68, maxsep=3.5, posid="positions_green_long"):
 
 
 def fieldpair_sortkey(pair):
-    "Rewrite the field id pairs so that lexigraphical sorting works properly"
+    "Rewrite the field id pairs so that lexical sorting works properly"
     def leftpadzero(s):
         "Changes 'c1_lg_1' -> 'c001_lg_1', etc"
         parts = s.split("_")
